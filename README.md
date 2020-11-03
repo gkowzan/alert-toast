@@ -14,10 +14,11 @@ in your emacs config file.
 
 # Icons
 Icons located on network shares are not supported. This includes icons on the
-WSL virtual drive, therefore for Emacs running under WSL the default Emacs
-icon is copied to `C:\Users\<user>\AppData\Local\Emacs-Toast\Emacs.png`. PNG
-version is used because toast notifications render SVG graphics as tiny and
-put them in top left corner of the notification.
+WSL virtual drive, therefore for Emacs running under WSL the default Emacs icon
+is copied to `C:\Users\<user>\AppData\Local\Emacs-Toast\Emacs.png`. PNG version
+is used because toast notifications render SVG graphics as tiny and put them in
+top left corner of the notification. A different default icon can be set be
+changing `alert-toast-default-icon`.
 
 Under WSL or Cygwin, a path to a custom icon should be given as a WSL/Cygwin
 path (`/mnt/c/...` or `/cygdrive/c/...`) instead of a Windows path (`C:\\...`).
