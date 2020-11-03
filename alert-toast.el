@@ -1,4 +1,4 @@
-;;; alert-toast.el --- Windows 10 toast notifications -*- lexical-binding: t; -*-
+;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Grzegorz Kowzan
 
