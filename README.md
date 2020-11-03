@@ -5,6 +5,9 @@ under Windows Subsystem for Linux (WSL) or under Cygwin. These notifications are
 limited to a single-line title and four lines of text. Longer text can be passed
 but it will be truncated by Windows 10.
 
+# Install
+Add `alert-toast.el` to one of the directories in `load-path`, then execute `(require 'alert-toast)` (and add it to your Emacs config file).
+
 # Usage
 This package defines a new alert style (`'toast`), so use it the same way you would use any other style.  For example, to use it with [mu4e-alert](https://github.com/iqbalansari/mu4e-alert), you should put:
 ``` emacs-lisp
