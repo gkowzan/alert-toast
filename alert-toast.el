@@ -1,4 +1,4 @@
-;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*-
+;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*- no-byte-compile: t; -*-
 
 ;; Copyright (C) 2020 Grzegorz Kowzan
 
@@ -130,6 +130,26 @@
   :type '(alist :key-type symbol :value-type string)
   :group 'alert)
 
+(defconst alert-toast--sounds
+  '((default . "ms-winsoundevent:Notification.Default")
+    (im . "ms-winsoundevent:Notification.IM")
+    (mail . "ms-winsoundevent:Notification.Mail")
+    (reminder . "ms-winsoundevent:Notification.Reminder")
+    (sms . "ms-winsoundevent:Notification.SMS"))
+  "Alist of available sounds.")
+
+(defconst alert-toast--looping-sounds
+  (let ((looping-sounds '((call . "ms-winsoundevent:Notification.Looping.Call")
+                        (alarm . "ms-winsoundevent:Notification.Looping.Alarm"))))
+  (dolist (i '(2 3 4 5 6 7 8 9 10) looping-sounds)
+    (setq looping-sounds
+          (cons `(,(intern (format "call%d" i)) . ,(format "ms-winsoundevent:Notification.Looping.Call%d" i))
+                looping-sounds))
+    (setq looping-sounds
+          (cons `(,(intern (format "alarm%d" i)) . ,(format "ms-winsoundevent:Notification.Looping.Alarm%d" i))
+                looping-sounds))))
+  "Alist of available looping sounds.")
+
 (defvar alert-toast--psprocess nil
   "Persistent powershell process emitting toast notifications.")
 
@@ -151,20 +171,45 @@
                       :noquery t
                       :connection-type 'pipe))
   (process-send-string alert-toast--psprocess "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
-    $Template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastImageAndText02)\n"))
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml, ContentType=WindowsRuntime] > $null\n"))
 
-(defconst alert-toast--psscript-text "$ToastTitle = '%s'
-    $ToastText = '%s'
+(defun alert-toast--psprocess-kill ()
+  "Kill powershell process (for debugging)."
+  (delete-process alert-toast--psprocess)
+  (setq alert-toast--psprocess nil))
 
-    $RawXml = [xml] $Template.GetXml()
-    ($RawXml.toast.visual.binding.text|where {$_.id -eq \"1\"}).AppendChild($RawXml.CreateTextNode($ToastTitle)) > $null
-    ($RawXml.toast.visual.binding.text|where {$_.id -eq \"2\"}).AppendChild($RawXml.CreateTextNode($ToastText)) > $null
-    $RawXml.toast.visual.binding.image.src = 'file://%s'
+(defconst alert-toast--template-xml "<toast><visual><binding template=\"ToastImageAndText02\"><image id=\"1\" src=\"\"/><text id=\"1\"></text><text id=\"2\"></text></binding></visual></toast>")
 
-    $SerializedXml = New-Object Windows.Data.Xml.Dom.XmlDocument
-    $SerializedXml.LoadXml($RawXml.OuterXml)
+(defun alert-toast--fill-template (title message icon-path &optional audio silent long loop)
+  "Fill toast XML template."
+  (let ((dom (with-temp-buffer
+               (insert alert-toast--template-xml)
+               (libxml-parse-xml-region (point-min) (point-max))))
+        (looping-sound (cdr (assq audio alert-toast--looping-sounds))))
+    (dom-set-attribute (first (dom-by-tag dom 'image)) 'src (concat "file://" icon-path))
+    (dom-append-child (first (dom-search dom (lambda (node)
+                                               (and (eq (dom-tag node) 'text)
+                                                    (string-equal (dom-attr node 'id) "1")))))
+                      title)
+    (dom-append-child (first (dom-search dom (lambda (node)
+                                               (and (eq (dom-tag node) 'text)
+                                                    (string-equal (dom-attr node 'id) "2")))))
+                      message)
+    (when (or audio silent loop)
+      (dom-append-child dom (dom-node 'audio `((src . ,(or looping-sound
+                                                           (cdr (assq audio alert-toast--sounds))
+                                                           (cdr (assq 'default alert-toast--sounds))))
+                                               (silent . ,(if silent "true" "false"))
+                                               (loop . ,(if (or loop looping-sound) "true" "false"))))))
+    (when (or long looping-sound)
+      (dom-set-attribute dom 'duration "long"))
+    (message (shr-dom-to-xml dom))
+    (shr-dom-to-xml dom)))
 
-    $Toast = [Windows.UI.Notifications.ToastNotification]::new($SerializedXml)
+(defconst alert-toast--psscript-text2 "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+    $Xml.LoadXml('%s')
+
+    $Toast = [Windows.UI.Notifications.ToastNotification]::new($Xml)
     $Toast.Tag = \"Emacs\"
     $Toast.Group = \"Emacs\"
     $Toast.Priority = %s
@@ -178,20 +223,24 @@
   "Send INFO using Windows 10 toast notification.
 Handles :ICON, :SEVERITY, :PERSISTENT, :NEVER-PERSIST, :TITLE and :MESSAGE keywords
 from INFO plist."
-  (let ((psscript (format alert-toast--psscript-text
-                          (s-replace-all alert-toast--psquote-replacements (plist-get info :title))
-                          (s-replace-all alert-toast--psquote-replacements (plist-get info :message))
-                          (s-replace-all alert-toast--psquote-replacements
-                                         (alert-toast--icon-path (or (plist-get info :icon)
-                                                                     alert-toast-default-icon)))
-                          (let ((priority (cdr (assq (plist-get info :severity) alert-toast-priorities))))
-                            (if priority
-                                priority
-                              (cdr (assq 'normal alert-toast-priorities))))
-                          (if (and (plist-get info :persistent)
-                                   (not (plist-get info :never-persist)))
-                              (* 60 60 24 7)  ; a week
-                            alert-fade-time))))
+  (let*  ((data-plist (plist-get info :data))
+          (psscript
+           (format alert-toast--psscript-text2
+                   (s-replace-all alert-toast--psquote-replacements
+                                  (alert-toast--fill-template
+                                   (plist-get info :title)
+                                   (plist-get info :message)
+                                   (alert-toast--icon-path (or (plist-get info :icon) alert-toast-default-icon))
+                                   (plist-get data-plist :audio)
+                                   (plist-get data-plist :silent)
+                                   (plist-get data-plist :long)
+                                   (plist-get data-plist :loop)))
+                   (or (cdr (assq (plist-get info :severity) alert-toast-priorities))
+                       (cdr (assq 'normal alert-toast-priorities)))
+                   (if (and (plist-get info :persistent)
+                            (not (plist-get info :never-persist)))
+                       (* 60 60 24 7)  ; a week
+                     alert-fade-time))))
     (unless alert-toast--psprocess
       (alert-toast--psprocess-init))
     (process-send-string alert-toast--psprocess psscript)))
@@ -204,4 +253,4 @@ from INFO plist."
 
 (provide 'alert-toast)
 ;;; alert-toast.el ends here
-;; (alert-toast-notify '(:title "Tytuł" :message "Zaźółć gęślą jaźń"))
+;; (alert-toast-notify '(:title "Tytuł" :message "Zaźółć gęślą jaźń" :severity urgent :data (:audio call6)))
