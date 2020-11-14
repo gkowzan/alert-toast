@@ -1,4 +1,4 @@
-;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*- no-byte-compile: t; -*-
+;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Grzegorz Kowzan
 
@@ -178,35 +178,52 @@
   (delete-process alert-toast--psprocess)
   (setq alert-toast--psprocess nil))
 
-(defconst alert-toast--template-xml "<toast><visual><binding template=\"ToastImageAndText02\"><image id=\"1\" src=\"\"/><text id=\"1\"></text><text id=\"2\"></text></binding></visual></toast>")
-
 (defun alert-toast--fill-template (title message icon-path &optional audio silent long loop)
-  "Fill toast XML template."
-  (let ((dom (with-temp-buffer
-               (insert alert-toast--template-xml)
-               (libxml-parse-xml-region (point-min) (point-max))))
-        (looping-sound (cdr (assq audio alert-toast--looping-sounds))))
-    (dom-set-attribute (first (dom-by-tag dom 'image)) 'src (concat "file://" icon-path))
-    (dom-append-child (first (dom-search dom (lambda (node)
-                                               (and (eq (dom-tag node) 'text)
-                                                    (string-equal (dom-attr node 'id) "1")))))
-                      title)
-    (dom-append-child (first (dom-search dom (lambda (node)
-                                               (and (eq (dom-tag node) 'text)
-                                                    (string-equal (dom-attr node 'id) "2")))))
-                      message)
+  "Create alert toast XML document."
+  (let ((looping-sound (alist-get audio alert-toast--looping-sounds))
+        (dom
+         (dom-node
+          'toast nil
+          (dom-node
+           'visual nil
+           (dom-node
+            'binding
+            '((template . "ToastImageAndText02"))
+            (dom-node 'text '((id . "1")) title)
+            (dom-node 'text '((id . "2")) message)
+            (dom-node 'image `((id . "1")
+                               (src . ,icon-path)
+                               (placement . "appLogoOverride"))))))))
     (when (or audio silent loop)
-      (dom-append-child dom (dom-node 'audio `((src . ,(or looping-sound
-                                                           (cdr (assq audio alert-toast--sounds))
-                                                           (cdr (assq 'default alert-toast--sounds))))
-                                               (silent . ,(if silent "true" "false"))
-                                               (loop . ,(if (or loop looping-sound) "true" "false"))))))
+      (dom-append-child
+       dom (dom-node 'audio `((src . ,(or looping-sound
+                                          (alist-get audio alert-toast--sounds)
+                                          (alist-get 'default alert-toast--sounds)))
+                              (silent . ,(if silent "true" "false"))
+                              (loop . ,(if (or loop looping-sound) "true" "false"))))))
     (when (or long looping-sound)
       (dom-set-attribute dom 'duration "long"))
-    (message (shr-dom-to-xml dom))
     (shr-dom-to-xml dom)))
 
-(defconst alert-toast--psscript-text2 "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+(defun alert-toast--fill-shoulder (title message icon person payload)
+  "Create shoulder tap XML document."
+  (let ((dom
+         (dom-node 'toast
+                   `((hint-people . ,person))
+                   (dom-node 'visual nil
+                             (dom-node 'binding '((template . "ToastGeneric"))
+                                       (dom-node 'text nil title)
+                                       (dom-node 'text nil message)
+                                       (dom-node 'image `((src . ,icon)
+                                                          (placement . "appLogoOverride")
+                                                          (hint-crop . "circle"))))
+                             (dom-node 'binding '((template . "ToastGeneric")
+                                                  (experienceType . "shoulderTap"))
+                                       (dom-node 'image `((src . ,payload))))
+                             ))))
+    (shr-dom-to-xml dom)))
+
+(defconst alert-toast--psscript-text "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
     $Xml.LoadXml('%s')
 
     $Toast = [Windows.UI.Notifications.ToastNotification]::new($Xml)
@@ -218,23 +235,43 @@
     $Notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\"Emacs\")
     $Notifier.Show($Toast);\n")
 
+(defconst alert-toast--psscript-shoulder "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+    $Xml.LoadXml('%s')
+
+    $Toast = [Windows.UI.Notifications.ToastNotification]::new($Xml)
+
+    $Notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Microsoft.People_8wekyb3d8bbwe!x4c7a3b7dy2188y46d4ya362y19ac5a5805e5x')
+    $Notifier.Show($Toast);\n")
+
 ;;;###autoload
 (defun alert-toast-notify (info)
   "Send INFO using Windows 10 toast notification.
 Handles :ICON, :SEVERITY, :PERSISTENT, :NEVER-PERSIST, :TITLE and :MESSAGE keywords
 from INFO plist."
-  (let*  ((data-plist (plist-get info :data))
-          (psscript
-           (format alert-toast--psscript-text2
-                   (s-replace-all alert-toast--psquote-replacements
-                                  (alert-toast--fill-template
-                                   (plist-get info :title)
-                                   (plist-get info :message)
-                                   (alert-toast--icon-path (or (plist-get info :icon) alert-toast-default-icon))
-                                   (plist-get data-plist :audio)
-                                   (plist-get data-plist :silent)
-                                   (plist-get data-plist :long)
-                                   (plist-get data-plist :loop)))
+  (let ((data-plist (plist-get info :data))
+        psscript)
+    (if (and (plist-get data-plist :shoulder-person) (plist-get data-plist :shoulder-payload))
+        (setq psscript (format alert-toast--psscript-shoulder
+                               (s-replace-all alert-toast--psquote-replacements
+                                              (alert-toast--fill-shoulder
+                                               (plist-get info :title)
+                                               (plist-get info :message)
+                                               (alert-toast--icon-path
+                                                (or (plist-get info :icon)
+                                                    alert-toast-default-icon))
+                                               (plist-get data-plist :shoulder-person)
+                                               (plist-get data-plist :shoulder-payload)))))
+      (setq psscript
+        (format alert-toast--psscript-text
+                (s-replace-all alert-toast--psquote-replacements
+                               (alert-toast--fill-template
+                                (plist-get info :title)
+                                (plist-get info :message)
+                                (alert-toast--icon-path (or (plist-get info :icon)      alert-toast-default-icon))
+                                (plist-get data-plist :audio)
+                                (plist-get data-plist :silent)
+                                (plist-get data-plist :long)
+                                (plist-get data-plist :loop)))
                    (or (cdr (assq (plist-get info :severity) alert-toast-priorities))
                        (cdr (assq 'normal alert-toast-priorities)))
                    (if (and (plist-get info :persistent)
