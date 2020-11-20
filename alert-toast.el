@@ -4,8 +4,8 @@
 
 ;; Author: Grzegorz Kowzan <grzegorz@kowzan.eu>
 ;; Created: 25 Oct 2020
-;; Updated: 25 Oct 2020
-;; Version: 0.1
+;; Updated: 20 Nov 2020
+;; Version: 0.2
 ;; Package-Requires: ((alert "1.2") (f "0.20.0") (s "1.12.0"))
 ;; Keywords: notification emacs message windows wsl
 ;; X-URL: https://github.com/gkowzan/alert-toast
@@ -219,8 +219,7 @@
                                                           (hint-crop . "circle"))))
                              (dom-node 'binding '((template . "ToastGeneric")
                                                   (experienceType . "shoulderTap"))
-                                       (dom-node 'image `((src . ,payload))))
-                             ))))
+                                       (dom-node 'image `((src . ,payload))))))))
     (shr-dom-to-xml dom)))
 
 (defconst alert-toast--psscript-text "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
@@ -290,4 +289,3 @@ from INFO plist."
 
 (provide 'alert-toast)
 ;;; alert-toast.el ends here
-;; (alert-toast-notify '(:title "Tytuł" :message "Zaźółć gęślą jaźń" :severity urgent :data (:audio call6)))
