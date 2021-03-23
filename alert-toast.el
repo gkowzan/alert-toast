@@ -60,6 +60,8 @@
 (require 'f)
 (require 's)
 (require 'alert)
+(require 'dom)
+(require 'shr)
 
 ;; WSL-related functions and constants
 ;; In the words of WSL developers, there is no official way of testing for WSL
