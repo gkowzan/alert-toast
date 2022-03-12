@@ -1,14 +1,13 @@
-;;; alert-toast.el --- Windows 10 toast notifications for Emacs -*- lexical-binding: t; -*-
+;;; alert-toast.el --- Windows 10 toast notifications -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2020 Grzegorz Kowzan
+;; Copyright 2020, 2022 Grzegorz Kowzan
 
 ;; Author: Grzegorz Kowzan <grzegorz@kowzan.eu>
 ;; Created: 25 Oct 2020
-;; Updated: 20 Nov 2020
-;; Version: 0.2
-;; Package-Requires: ((alert "1.2") (f "0.20.0") (s "1.12.0"))
-;; Keywords: notification emacs message windows wsl
-;; X-URL: https://github.com/gkowzan/alert-toast
+;; Updated: 25 Mar 2022
+;; Version: 1.0.0
+;; Package-Requires: ((emacs "25.1") (alert "1.2") (f "0.20.0") (s "1.12.0"))
+;; Url: https://github.com/gkowzan/alert-toast
 
 ;; This program is free software; you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
@@ -68,6 +67,7 @@
 ;; but they said at the same time that either "wsl" or "microsoft" should always
 ;; be present in the kernel release string.
 (defun alert-toast--check-wsl ()
+  "Check if running under Windows Subsystem for Linux."
   (and (eq system-type 'gnu/linux)
        (let ((kernel-release (shell-command-to-string "uname --kernel-release")))
          (or (s-contains? "wsl" kernel-release t)
@@ -181,7 +181,17 @@
   (setq alert-toast--psprocess nil))
 
 (defun alert-toast--fill-template (title message icon-path &optional audio silent long loop)
-  "Create alert toast XML document."
+  "Create alert toast XML document.
+
+Set title to TITLE, message body to MESSAGE and icon to the image at ICON-PATH.
+ICON-PATH has to be a native Windows path, use `alert-toast--icon-path' for
+Cygwin->native and WSL->native conversion.
+
+AUDIO can be one of symbols defined in `alert-toast--sounds' or
+`alert-toast--looping-sounds'. If SILENT is non-nil, the notification is muted.
+If LONG is non-nil or one of the sounds in `alert-toast--looping-sounds' was
+provided as AUDIO, then the notification will last for ~20 s; otherwise it lasts
+for several seconds. Non-nil LOOP will loop the sound."
   (let ((looping-sound (alist-get audio alert-toast--looping-sounds))
         (dom
          (dom-node
@@ -207,8 +217,17 @@
       (dom-set-attribute dom 'duration "long"))
     (shr-dom-to-xml dom)))
 
-(defun alert-toast--fill-shoulder (title message icon person payload)
-  "Create shoulder tap XML document."
+(defun alert-toast--fill-shoulder (title message icon-path person payload)
+  "Create shoulder tap XML document.
+
+PERSON is an email address given as 'mailto:login@domain.com' of a contact
+previously added to My People. PAYLOAD is either remote http or local path to a
+GIF or PNG image. Under WSL and Cygwin, local paths need to be converted to
+native Windows paths with `alert-toast--icon-path'.
+
+As a fallback, set title to TITLE, message body to MESSAGE and icon to the image
+at ICON-PATH. ICON-PATH has to be a native Windows path, use
+`alert-toast--icon-path' for Cygwin->native and WSL->native conversion."
   (let ((dom
          (dom-node 'toast
                    `((hint-people . ,person))
@@ -216,7 +235,7 @@
                              (dom-node 'binding '((template . "ToastGeneric"))
                                        (dom-node 'text nil title)
                                        (dom-node 'text nil message)
-                                       (dom-node 'image `((src . ,icon)
+                                       (dom-node 'image `((src . ,icon-path)
                                                           (placement . "appLogoOverride")
                                                           (hint-crop . "circle"))))
                              (dom-node 'binding '((template . "ToastGeneric")
@@ -234,7 +253,8 @@
     $Toast.ExpirationTime = [DateTimeOffset]::Now.AddSeconds(%f)
 
     $Notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\"Emacs\")
-    $Notifier.Show($Toast);\n")
+    $Notifier.Show($Toast);\n"
+  "Template of Powershell script emitting regular toast notification.")
 
 (defconst alert-toast--psscript-shoulder "$Xml = New-Object Windows.Data.Xml.Dom.XmlDocument
     $Xml.LoadXml('%s')
@@ -242,13 +262,14 @@
     $Toast = [Windows.UI.Notifications.ToastNotification]::new($Xml)
 
     $Notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Microsoft.People_8wekyb3d8bbwe!x4c7a3b7dy2188y46d4ya362y19ac5a5805e5x')
-    $Notifier.Show($Toast);\n")
+    $Notifier.Show($Toast);\n"
+  "Template of Powershell script emitting shoulder tap.")
 
 ;;;###autoload
 (defun alert-toast-notify (info)
   "Send INFO using Windows 10 toast notification.
-Handles :ICON, :SEVERITY, :PERSISTENT, :NEVER-PERSIST, :TITLE and :MESSAGE keywords
-from INFO plist."
+Handles :ICON, :SEVERITY, :PERSISTENT, :NEVER-PERSIST, :TITLE and
+:MESSAGE keywords from INFO plist."
   (let ((data-plist (plist-get info :data))
         psscript)
     (if (and (plist-get data-plist :shoulder-person) (plist-get data-plist :shoulder-payload))
