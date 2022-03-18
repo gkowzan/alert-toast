@@ -9,8 +9,38 @@ but it will be truncated by Windows 10.
 
 # Install
 
-Add `alert-toast.el` to one of the directories in `load-path`, then execute
-`(require 'alert-toast)` (and add it to your Emacs config file).
+The package is available on [MELPA](https://melpa.org) and can be installed with Emacs package managers.
+
+## package.el
+
+Ensure that `package.el` is initialized and uses MELPA as a source of packages:
+
+``` emacs-lisp
+(require 'package)
+(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/") t)
+(package-initialize)
+```
+
+Install and load `alert-toast` with:
+
+``` emacs-lisp
+(package-install 'alert-toast)
+(require 'alert-toast)
+;; (setq alert-default-style 'toast)
+```
+
+## use-package
+
+You can install `alert-toast` and set it as the default style with:
+
+``` emacs-lisp
+(use-package alert
+  :commands (alert)
+  :config (setq alert-default-style 'toast))
+  
+(use-package alert-toast
+  :after alert)
+```
 
 # Usage
 
@@ -76,7 +106,7 @@ For example:
 taps](https://docs.microsoft.com/en-us/windows/uwp/contacts-and-calendar/my-people-notifications)
 aka My People notifications. To use it, provide email of the contact as the
 `:shoulder-person` property of the `:data` plist in `mailto:<email>` format and
-an addres (local or http) of a GIF or PNG image as `:shoulder-payload` property.
+an address (local or http) of a GIF or PNG image as `:shoulder-payload` property.
 If the file is local and you're using Cygwin or WSL, then convert the path to
 native Windows path with `(alert-toast--icon-path path)`. The contact with the
 provided email address needs to be pinned to the taskbar beforehand, otherwise
